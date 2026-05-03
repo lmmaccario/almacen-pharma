@@ -31,8 +31,17 @@
                 </svg>
                 Configuración Cloud
             </h2>
-            <p class="text-xs text-slate-400 leading-relaxed">Detectamos que la aplicación se ejecuta fuera del entorno de desarrollo. Para sincronizar, pegue el JSON de Firebase:</p>
-            <textarea id="manualConfig" class="input-pharma h-48 text-[10px] font-mono leading-tight" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", ...}'></textarea>
+            <div class="bg-amber-900/20 border border-amber-500/30 p-3 rounded text-[11px] text-amber-200">
+                <strong>Importante:</strong> Pegue el objeto <code>firebaseConfig</code> que aparece en la consola de Firebase. Debe empezar con <code>{</code> y terminar con <code>}</code>.
+            </div>
+            <textarea id="manualConfig" class="input-pharma h-48 text-[10px] font-mono leading-tight" placeholder='{
+  "apiKey": "AIza...",
+  "authDomain": "tu-proyecto.firebaseapp.com",
+  "projectId": "tu-proyecto",
+  "storageBucket": "tu-proyecto.appspot.com",
+  "messagingSenderId": "...",
+  "appId": "..."
+}'></textarea>
             <div class="flex gap-2">
                 <button id="btnSaveConfig" class="btn-primary flex-1">Activar Conexión</button>
                 <button onclick="document.getElementById('setupView').classList.add('hidden')" class="bg-slate-800 text-slate-400 px-4 rounded text-xs hover:bg-slate-700">Cerrar</button>
@@ -152,23 +161,29 @@
             const setupView = document.getElementById('setupView');
             let config = null;
 
-            // 1. Detectar si estamos en el entorno de desarrollo (Canvas)
-            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                try { config = JSON.parse(__firebase_config); } catch(e) {}
-            } 
-            
-            // 2. Si no, buscar en almacenamiento local (GitHub Pages)
-            if (!config) {
-                const saved = localStorage.getItem('pharma_fb_config');
-                if (saved) {
-                    try { config = JSON.parse(saved); } catch(e) {}
+            // 1. Prioridad: Almacenamiento local (Configuración manual del usuario)
+            const saved = localStorage.getItem('pharma_fb_config');
+            if (saved) {
+                try { 
+                    // Limpieza preventiva de caracteres invisibles
+                    const cleanJson = saved.replace(/[\u200B-\u200D\uFEFF]/g, '');
+                    config = JSON.parse(cleanJson); 
+                } catch(e) {
+                    console.error("Configuración local corrupta");
+                    localStorage.removeItem('pharma_fb_config');
                 }
             }
 
-            // 3. Si sigue sin haber config, mostrar pantalla oscura inmediatamente
+            // 2. Si no hay local, buscar en entorno de desarrollo
+            if (!config && typeof __firebase_config !== 'undefined' && __firebase_config) {
+                try { config = JSON.parse(__firebase_config); } catch(e) {}
+            } 
+
+            // 3. Si sigue sin haber config válida, mostrar setup inmediatamente
             if (!config) {
                 setupView.classList.remove('hidden');
                 label.textContent = "ESPERANDO CONFIGURACIÓN...";
+                updateConnUI(false);
                 return;
             }
 
@@ -199,22 +214,33 @@
 
             } catch (error) {
                 console.error("Error en inicio:", error);
-                label.textContent = "ERROR DE CONFIGURACIÓN";
-                // Si la config guardada es errónea, abrir setup para corregir
+                label.textContent = "ERROR DE CONEXIÓN";
+                // Permitir reconfigurar si falla
                 setupView.classList.remove('hidden');
+                updateConnUI(false);
             }
         };
 
-        // Guardar configuración manual
+        // Guardar configuración manual con limpieza profunda
         document.getElementById('btnSaveConfig').onclick = () => {
-            const val = document.getElementById('manualConfig').value.trim();
+            let val = document.getElementById('manualConfig').value.trim();
             if(!val) return;
+            
             try {
+                // Eliminar cualquier cosa antes del primer '{' y después del último '}'
+                const firstBrace = val.indexOf('{');
+                const lastBrace = val.lastIndexOf('}');
+                if (firstBrace === -1 || lastBrace === -1) throw new Error("Formato inválido");
+                
+                val = val.substring(firstBrace, lastBrace + 1);
+                
+                // Validar que sea JSON real
                 JSON.parse(val);
+                
                 localStorage.setItem('pharma_fb_config', val);
                 location.reload();
             } catch (e) {
-                alert("El JSON no es válido. Asegúrese de copiar el objeto completo desde la consola de Firebase.");
+                alert("Error: El texto pegado no es un JSON válido. Asegúrese de copiar desde '{' hasta '}' sin texto extra.");
             }
         };
 
