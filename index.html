@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PharmaStock Cloud - Almacén 1000</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        :root {
+            --pharma-dark: #0f172a;
+            --pharma-accent: #38bdf8;
+        }
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #f8fafc; }
+        .glass-panel { background: rgba(30, 41, 59, 0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; }
+        .input-pharma { background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; color: #f8fafc; padding: 0.75rem; border-radius: 6px; width: 100%; transition: all 0.2s; }
+        .input-pharma:focus { outline: none; border-color: var(--pharma-accent); box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2); }
+        .btn-primary { background-color: var(--pharma-accent); color: #0f172a; font-weight: 600; padding: 0.75rem 1.5rem; border-radius: 6px; transition: all 0.2s; cursor: pointer; }
+        .btn-primary:hover { background-color: #7dd3fc; transform: translateY(-1px); }
+        .status-badge { padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 50; align-items: center; justify-content: center; }
+    </style>
+</head>
+<body>
+    <div class="max-w-7xl mx-auto p-4 md:p-8">
+        <header class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-white">PharmaStock <span class="text-sky-400">Cloud</span></h1>
+                <p class="text-slate-400 text-sm">Sincronización Multi-usuario en Tiempo Real</p>
+                <div class="flex items-center gap-2 mt-1">
+                    <span id="connStatus" class="w-2 h-2 bg-red-500 rounded-full"></span>
+                    <span id="connLabel" class="text-[10px] text-slate-500 uppercase tracking-widest">Desconectado</span>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="exportToCSV()" class="bg-slate-800 text-white px-4 py-2 rounded border border-slate-700 text-sm">Exportar CSV</button>
+                <button onclick="confirmClearData()" class="bg-red-900/30 text-red-400 px-4 py-2 rounded border border-red-900/50 text-sm">Limpiar Campaña</button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- Formulario de Ingreso -->
+            <div class="lg:col-span-4 space-y-6">
+                <section class="glass-panel p-6">
+                    <h2 class="font-bold mb-4 flex items-center gap-2"><span class="w-1 h-4 bg-sky-500"></span> Ingreso (1000)</h2>
+                    <form id="formIngreso" class="space-y-3">
+                        <input type="text" id="codMaterial" class="input-pharma text-sm" placeholder="Código Material" required>
+                        <input type="text" id="lote" class="input-pharma text-sm" placeholder="Lote" required>
+                        <input type="number" id="cantInicial" step="0.01" class="input-pharma text-sm" placeholder="Cantidad Inicial" required>
+                        <input type="text" id="ops" class="input-pharma text-sm" placeholder="Órdenes de Producción">
+                        <button type="submit" class="btn-primary w-full">Dar de Alta</button>
+                    </form>
+                </section>
+
+                <!-- Formulario de Consumo -->
+                <section class="glass-panel p-6 border-l-4 border-amber-500">
+                    <h2 class="font-bold mb-4 text-amber-500">Registro Consumo</h2>
+                    <form id="formConsumo" class="space-y-3">
+                        <select id="selectLote" class="input-pharma text-sm" required>
+                            <option value="">Esperando conexión...</option>
+                        </select>
+                        <input type="text" id="ofConsumo" class="input-pharma text-sm" placeholder="OF / Orden Fabricación" required>
+                        <input type="number" id="cantConsumo" step="0.01" class="input-pharma text-sm" placeholder="Cantidad a Consumir" required>
+                        <button type="submit" class="btn-primary w-full bg-amber-500 hover:bg-amber-400">Registrar</button>
+                    </form>
+                </section>
+            </div>
+
+            <!-- Panel de Visualización -->
+            <div class="lg:col-span-8 space-y-6">
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="glass-panel p-4 text-center">
+                        <div class="text-xs text-slate-500">Lotes</div>
+                        <div id="kpiLotes" class="text-2xl font-bold">0</div>
+                    </div>
+                    <div class="glass-panel p-4 text-center border-b-2 border-green-500">
+                        <div class="text-xs text-slate-500">Consumido</div>
+                        <div id="kpiConsumo" class="text-2xl font-bold text-green-500">0.00</div>
+                    </div>
+                    <div class="glass-panel p-4 text-center border-b-2 border-red-500">
+                        <div class="text-xs text-slate-500">Saldo (501)</div>
+                        <div id="kpiSaldo" class="text-2xl font-bold text-red-500">0.00</div>
+                    </div>
+                </div>
+
+                <div class="glass-panel overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-slate-800/50 text-slate-400">
+                            <tr>
+                                <th class="p-4 text-left">Material / Lote</th>
+                                <th class="p-4 text-right">Inicial</th>
+                                <th class="p-4 text-right">Consumos</th>
+                                <th class="p-4 text-right">Saldo</th>
+                                <th class="p-4 text-center">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventoryBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-4 right-4 p-4 rounded-lg shadow-xl translate-y-24 transition-all duration-300 z-50 text-white font-bold" style="display: none;"></div>
+
+    <div id="confirmModal" class="modal">
+        <div class="glass-panel p-6 max-w-sm w-full mx-4 text-center">
+            <h3 class="font-bold mb-2">¿Limpiar Base de Datos?</h3>
+            <p class="text-xs text-slate-400 mb-6">Esto eliminará los datos para TODOS los usuarios conectados.</p>
+            <div class="flex gap-2">
+                <button onclick="closeModal()" class="flex-1 bg-slate-700 p-2 rounded text-xs">Cancelar</button>
+                <button id="btnConfirmClear" class="flex-1 bg-red-600 p-2 rounded text-xs font-bold">Eliminar Todo</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+
+        // Firebase Initialization
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharma-almacen-1000';
+        
+        // Use Strict Path (Rule 1)
+        const collectionPath = ['artifacts', appId, 'public', 'data', 'materiales'];
+
+        let materiales = [];
+        let currentUser = null;
+        let unsubscribeSnapshot = null;
+
+        // Authentication Flow (Rule 3)
+        async function initAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (error) {
+                console.error("Auth Error:", error);
+                showToast("Error de autenticación", "error");
+            }
+        }
+
+        // Listener for Auth State
+        onAuthStateChanged(auth, (user) => {
+            currentUser = user;
+            if (user) {
+                updateConnUI(true);
+                setupRealtimeListener();
+            } else {
+                updateConnUI(false);
+                if (unsubscribeSnapshot) unsubscribeSnapshot();
+            }
+        });
+
+        function updateConnUI(isConnected) {
+            const dot = document.getElementById('connStatus');
+            const label = document.getElementById('connLabel');
+            if (isConnected) {
+                dot.className = "w-2 h-2 bg-sky-500 rounded-full animate-pulse";
+                label.textContent = "Conectado a Firestore";
+            } else {
+                dot.className = "w-2 h-2 bg-red-500 rounded-full";
+                label.textContent = "Desconectado";
+            }
+        }
+
+        function setupRealtimeListener() {
+            if (!currentUser) return;
+            
+            const q = collection(db, ...collectionPath);
+            
+            // Unsubscribe existing if any
+            if (unsubscribeSnapshot) unsubscribeSnapshot();
+
+            unsubscribeSnapshot = onSnapshot(q, 
+                (snapshot) => {
+                    materiales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Sort in memory (Rule 2)
+                    materiales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+                    renderApp();
+                }, 
+                (error) => {
+                    console.error("Snapshot Error:", error);
+                    showToast("Error de permisos: Verificando...", "error");
+                }
+            );
+        }
+
+        // Database Operations
+        document.getElementById('formIngreso').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) {
+                showToast("No hay conexión con el servidor", "error");
+                return;
+            }
+
+            const codigo = document.getElementById('codMaterial').value.trim();
+            const lote = document.getElementById('lote').value.trim();
+            const cantInicial = parseFloat(document.getElementById('cantInicial').value);
+            const ops = document.getElementById('ops').value;
+
+            if (materiales.some(m => m.lote === lote && m.codigo === codigo)) {
+                showToast("Este lote ya existe", "error");
+                return;
+            }
+
+            try {
+                const docId = crypto.randomUUID();
+                await setDoc(doc(db, ...collectionPath, docId), {
+                    codigo, lote, cantInicial, ops,
+                    consumos: [],
+                    timestamp: new Date().toISOString()
+                });
+                showToast("Material guardado", "success");
+                e.target.reset();
+            } catch (err) {
+                console.error(err);
+                showToast("Error al guardar en la nube", "error");
+            }
+        });
+
+        document.getElementById('formConsumo').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!currentUser) return;
+
+            const materialId = document.getElementById('selectLote').value;
+            const cantConsumo = parseFloat(document.getElementById('cantConsumo').value);
+            const ofConsumo = document.getElementById('ofConsumo').value;
+
+            const material = materiales.find(m => m.id === materialId);
+            const consumosActuales = material.consumos || [];
+            const saldoActual = material.cantInicial - consumosActuales.reduce((acc, c) => acc + c.cantidad, 0);
+
+            if (cantConsumo > saldoActual) {
+                showToast(`Saldo insuficiente: ${saldoActual.toFixed(2)}`, "error");
+                return;
+            }
+
+            try {
+                await updateDoc(doc(db, ...collectionPath, materialId), {
+                    consumos: [...consumosActuales, {
+                        of: ofConsumo,
+                        cantidad: cantConsumo,
+                        fecha: new Date().toISOString()
+                    }]
+                });
+                showToast("Consumo registrado", "success");
+                e.target.reset();
+            } catch (err) {
+                showToast("Error al actualizar consumo", "error");
+            }
+        });
+
+        window.exportToCSV = () => {
+            if (materiales.length === 0) return;
+            let csv = 'Codigo,Lote,Inicial,Consumido,Saldo,OPs\n';
+            materiales.forEach(m => {
+                const cons = (m.consumos || []).reduce((a,c) => a + c.cantidad, 0);
+                csv += `"${m.codigo}","${m.lote}",${m.cantInicial},${cons},${(m.cantInicial-cons).toFixed(2)},"${m.ops}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Reporte_Inventario_1000.csv`;
+            a.click();
+        };
+
+        window.confirmClearData = () => document.getElementById('confirmModal').style.display = 'flex';
+        window.closeModal = () => document.getElementById('confirmModal').style.display = 'none';
+
+        document.getElementById('btnConfirmClear').addEventListener('click', async () => {
+            if (!currentUser) return;
+            try {
+                const q = collection(db, ...collectionPath);
+                const snapshot = await getDocs(q);
+                const batch = writeBatch(db);
+                snapshot.docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                closeModal();
+                showToast("Base de datos limpia", "success");
+            } catch (err) {
+                showToast("Error al limpiar datos", "error");
+            }
+        });
+
+        function renderApp() {
+            const tbody = document.getElementById('inventoryBody');
+            const selectLote = document.getElementById('selectLote');
+            const currentSelectVal = selectLote.value;
+            
+            let totalConsumidoGral = 0;
+            let totalSaldoGral = 0;
+
+            tbody.innerHTML = '';
+            selectLote.innerHTML = '<option value="">Seleccione un lote...</option>';
+
+            materiales.forEach(m => {
+                const consumosTotal = (m.consumos || []).reduce((acc, c) => acc + c.cantidad, 0);
+                const saldo = m.cantInicial - consumosTotal;
+                totalConsumidoGral += consumosTotal;
+                totalSaldoGral += saldo;
+
+                let statusClass = "bg-green-500/20 text-green-400";
+                let statusText = "Disponible";
+                if (saldo <= 0.001) {
+                    statusClass = "bg-red-500/20 text-red-400";
+                    statusText = "Agotado";
+                }
+
+                const row = document.createElement('tr');
+                row.className = "hover:bg-slate-800/40 border-b border-slate-800 transition-colors";
+                row.innerHTML = `
+                    <td class="p-4">
+                        <div class="font-bold text-slate-100">${m.codigo}</div>
+                        <div class="text-[10px] text-slate-500 uppercase font-mono">Lote: ${m.lote}</div>
+                    </td>
+                    <td class="p-4 text-right font-mono text-slate-300">${m.cantInicial.toFixed(2)}</td>
+                    <td class="p-4 text-right font-mono text-slate-300">${consumosTotal.toFixed(2)}</td>
+                    <td class="p-4 text-right font-bold font-mono ${saldo <= 0 ? 'text-red-400' : 'text-sky-400'}">${saldo.toFixed(2)}</td>
+                    <td class="p-4 text-center">
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                    </td>
+                `;
+                tbody.appendChild(row);
+
+                if(saldo > 0.001) {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = `${m.codigo} | L: ${m.lote} (S: ${saldo.toFixed(2)})`;
+                    selectLote.appendChild(opt);
+                }
+            });
+
+            selectLote.value = currentSelectVal;
+            document.getElementById('kpiLotes').textContent = materiales.length;
+            document.getElementById('kpiConsumo').textContent = totalConsumidoGral.toFixed(2);
+            document.getElementById('kpiSaldo').textContent = totalSaldoGral.toFixed(2);
+        }
+
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.backgroundColor = type === 'success' ? '#166534' : '#991b1b';
+            t.style.display = 'block';
+            t.classList.remove('translate-y-24');
+            t.classList.add('translate-y-0');
+            setTimeout(() => { t.classList.add('translate-y-24'); }, 3000);
+        }
+
+        initAuth();
+    </script>
+</body>
+</html>
