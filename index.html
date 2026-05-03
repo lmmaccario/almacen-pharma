@@ -22,6 +22,15 @@
     </style>
 </head>
 <body>
+    <div id="setupView" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-slate-950 p-4">
+        <div class="glass-panel p-8 max-w-md w-full space-y-4">
+            <h2 class="text-xl font-bold text-sky-400">Configuración Inicial Cloud</h2>
+            <p class="text-sm text-slate-400">Para funcionar en GitHub Pages, pegue el JSON de configuración de su proyecto Firebase aquí:</p>
+            <textarea id="manualConfig" class="input-pharma h-32 text-xs font-mono" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", ...}'></textarea>
+            <button id="btnSaveConfig" class="btn-primary w-full">Activar Conexión</button>
+        </div>
+    </div>
+
     <div class="max-w-7xl mx-auto p-4 md:p-8">
         <header class="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
             <div>
@@ -29,7 +38,7 @@
                 <p class="text-slate-400 text-sm">Sincronización Multi-usuario en Tiempo Real</p>
                 <div class="flex items-center gap-2 mt-1">
                     <span id="connStatus" class="w-2 h-2 bg-red-500 rounded-full"></span>
-                    <span id="connLabel" class="text-[10px] text-slate-500 uppercase tracking-widest">Iniciando conexión...</span>
+                    <span id="connLabel" class="text-[10px] text-slate-500 uppercase tracking-widest">Iniciando sistema...</span>
                 </div>
             </div>
             <div class="flex gap-2">
@@ -125,31 +134,28 @@
         let currentUser = null;
         let unsubscribeSnapshot = null;
 
-        // Intentar obtener la config del sistema o usar una estructura vacía para evitar errores de parseo
-        const getSystemConfig = () => {
-            try {
-                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                    return JSON.parse(__firebase_config);
-                }
-            } catch (e) {
-                console.warn("Configuración inyectada no válida, intentando conexión alternativa...");
-            }
-            return null;
-        };
-
         const startPharmaCloud = async () => {
             const label = document.getElementById('connLabel');
-            const config = getSystemConfig();
-            
+            let config = null;
+
+            // 1. Intentar obtener config inyectada
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                config = JSON.parse(__firebase_config);
+            } 
+            // 2. Intentar obtener config guardada manualmente en el navegador
+            else {
+                const saved = localStorage.getItem('pharma_fb_config');
+                if (saved) config = JSON.parse(saved);
+            }
+
             if (!config) {
-                label.textContent = "Error: Configuración no encontrada. Revise su entorno.";
-                // Si estás en GitHub Pages y sale este error, es porque falta inyectar la llave.
-                // Sin embargo, para este ejercicio, forzamos el reintento.
-                setTimeout(startPharmaCloud, 3000);
+                document.getElementById('setupView').classList.remove('hidden');
+                label.textContent = "Esperando configuración manual...";
                 return;
             }
 
             try {
+                document.getElementById('setupView').classList.add('hidden');
                 app = initializeApp(config);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -163,6 +169,7 @@
                         setupRealtimeListener();
                     } else {
                         updateConnUI(false);
+                        label.textContent = "Autenticando...";
                     }
                 });
 
@@ -174,8 +181,21 @@
 
             } catch (error) {
                 console.error("Error en inicio:", error);
-                label.textContent = "Error de Red. Reintentando...";
-                setTimeout(startPharmaCloud, 5000);
+                label.textContent = "Error de Conexión. Reintente.";
+                localStorage.removeItem('pharma_fb_config'); // Limpiar si falló
+                setTimeout(() => location.reload(), 3000);
+            }
+        };
+
+        // Manejador para configuración manual
+        document.getElementById('btnSaveConfig').onclick = () => {
+            const val = document.getElementById('manualConfig').value;
+            try {
+                JSON.parse(val);
+                localStorage.setItem('pharma_fb_config', val);
+                location.reload();
+            } catch (e) {
+                alert("JSON no válido. Asegúrese de copiar el objeto completo { ... }");
             }
         };
 
@@ -187,7 +207,6 @@
                 label.textContent = "Conectado a Pharma Cloud";
             } else {
                 dot.className = "w-2 h-2 bg-red-500 rounded-full";
-                label.textContent = "Desconectado";
             }
         }
 
@@ -204,175 +223,99 @@
                 }, 
                 (error) => {
                     console.error("Snapshot Error:", error);
-                    showToast("Error de acceso a datos", "error");
+                    showToast("Error de acceso", "error");
                 }
             );
         }
 
-        document.getElementById('formIngreso').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            if (!currentUser) { showToast("No conectado", "error"); return; }
-
-            const codigo = document.getElementById('codMaterial').value.trim();
-            const lote = document.getElementById('lote').value.trim();
-            const cantInicial = parseFloat(document.getElementById('cantInicial').value);
-            const ops = document.getElementById('ops').value;
-
-            if (materiales.some(m => m.lote === lote && m.codigo === codigo)) {
-                showToast("Este lote ya existe", "error");
-                return;
-            }
-
-            try {
-                const docId = crypto.randomUUID();
-                await setDoc(doc(db, ...collectionPath, docId), {
-                    codigo, lote, cantInicial, ops,
-                    consumos: [],
-                    timestamp: new Date().toISOString()
-                });
-                showToast("Material guardado", "success");
-                e.target.reset();
-            } catch (err) {
-                showToast("Error al guardar", "error");
-            }
-        });
-
-        document.getElementById('formConsumo').addEventListener('submit', async (e) => {
+        // --- Lógica de Negocio ---
+        document.getElementById('formIngreso').onsubmit = async (e) => {
             e.preventDefault();
             if (!currentUser) return;
-
-            const materialId = document.getElementById('selectLote').value;
-            const cantConsumo = parseFloat(document.getElementById('cantConsumo').value);
-            const ofConsumo = document.getElementById('ofConsumo').value;
-
-            const material = materiales.find(m => m.id === materialId);
-            if (!material) return;
-            
-            const consumosActuales = material.consumos || [];
-            const saldoActual = material.cantInicial - consumosActuales.reduce((acc, c) => acc + c.cantidad, 0);
-
-            if (cantConsumo > saldoActual) {
-                showToast(`Saldo insuficiente: ${saldoActual.toFixed(2)}`, "error");
-                return;
-            }
-
+            const data = {
+                codigo: document.getElementById('codMaterial').value.trim(),
+                lote: document.getElementById('lote').value.trim(),
+                cantInicial: parseFloat(document.getElementById('cantInicial').value),
+                ops: document.getElementById('ops').value,
+                consumos: [],
+                timestamp: new Date().toISOString()
+            };
             try {
-                await updateDoc(doc(db, ...collectionPath, materialId), {
-                    consumos: [...consumosActuales, {
-                        of: ofConsumo,
-                        cantidad: cantConsumo,
-                        fecha: new Date().toISOString()
-                    }]
+                await setDoc(doc(db, ...collectionPath, crypto.randomUUID()), data);
+                showToast("Material registrado", "success");
+                e.target.reset();
+            } catch (err) { showToast("Error al guardar", "error"); }
+        };
+
+        document.getElementById('formConsumo').onsubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('selectLote').value;
+            const cant = parseFloat(document.getElementById('cantConsumo').value);
+            const m = materiales.find(x => x.id === id);
+            if (!m) return;
+            const saldo = m.cantInicial - (m.consumos || []).reduce((a,c) => a + c.cantidad, 0);
+            if (cant > saldo) { showToast("Saldo insuficiente", "error"); return; }
+            try {
+                await updateDoc(doc(db, ...collectionPath, id), {
+                    consumos: [...(m.consumos || []), { of: document.getElementById('ofConsumo').value, cantidad: cant, fecha: new Date().toISOString() }]
                 });
                 showToast("Consumo registrado", "success");
                 e.target.reset();
-            } catch (err) {
-                showToast("Error al actualizar", "error");
-            }
-        });
+            } catch (err) { showToast("Error", "error"); }
+        };
 
         window.exportToCSV = () => {
-            if (materiales.length === 0) { showToast("No hay datos para exportar", "error"); return; }
-            let csv = 'Codigo,Lote,Inicial,Consumido,Saldo,OPs\n';
+            let csv = 'Codigo,Lote,Inicial,Consumido,Saldo\n';
             materiales.forEach(m => {
-                const cons = (m.consumos || []).reduce((a,c) => a + c.cantidad, 0);
-                csv += `"${m.codigo}","${m.lote}",${m.cantInicial},${cons},${(m.cantInicial-cons).toFixed(2)},"${m.ops}"\n`;
+                const c = (m.consumos || []).reduce((a,x) => a + x.cantidad, 0);
+                csv += `${m.codigo},${m.lote},${m.cantInicial},${c},${(m.cantInicial-c).toFixed(2)}\n`;
             });
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = window.URL.createObjectURL(blob);
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = `Reporte_Inventario_1000.csv`;
-            a.click();
+            a.href = url; a.download = 'PharmaStock_1000.csv'; a.click();
         };
 
-        window.confirmClearData = () => {
-            if (materiales.length === 0) return;
-            document.getElementById('confirmModal').style.display = 'flex';
-        };
+        window.confirmClearData = () => document.getElementById('confirmModal').style.display = 'flex';
         window.closeModal = () => document.getElementById('confirmModal').style.display = 'none';
-
-        document.getElementById('btnConfirmClear').addEventListener('click', async () => {
-            if (!currentUser) return;
-            try {
-                const q = collection(db, ...collectionPath);
-                const snapshot = await getDocs(q);
-                const batch = writeBatch(db);
-                snapshot.docs.forEach(d => batch.delete(d.ref));
-                await batch.commit();
-                closeModal();
-                showToast("Base de datos limpia", "success");
-            } catch (err) {
-                showToast("Error al limpiar", "error");
-            }
-        });
+        document.getElementById('btnConfirmClear').onclick = async () => {
+            const batch = writeBatch(db);
+            const docs = await getDocs(collection(db, ...collectionPath));
+            docs.forEach(d => batch.delete(d.ref));
+            await batch.commit();
+            closeModal();
+            showToast("Datos eliminados", "success");
+        };
 
         function renderApp() {
             const tbody = document.getElementById('inventoryBody');
-            const selectLote = document.getElementById('selectLote');
-            const currentSelectVal = selectLote.value;
-            
-            let totalConsumidoGral = 0;
-            let totalSaldoGral = 0;
-
-            tbody.innerHTML = '';
-            selectLote.innerHTML = '<option value="">Seleccione un lote...</option>';
-
+            const select = document.getElementById('selectLote');
+            tbody.innerHTML = ''; select.innerHTML = '<option value="">Seleccione Lote...</option>';
+            let tCons = 0, tSaldo = 0;
             materiales.forEach(m => {
-                const consumosTotal = (m.consumos || []).reduce((acc, c) => acc + c.cantidad, 0);
-                const saldo = m.cantInicial - consumosTotal;
-                totalConsumidoGral += consumosTotal;
-                totalSaldoGral += saldo;
-
-                let statusClass = "bg-green-500/20 text-green-400";
-                let statusText = "Disponible";
-                if (saldo <= 0.001) {
-                    statusClass = "bg-red-500/20 text-red-400";
-                    statusText = "Agotado";
-                }
-
-                const row = document.createElement('tr');
-                row.className = "hover:bg-slate-800/40 border-b border-slate-800 transition-colors";
-                row.innerHTML = `
-                    <td class="p-4">
-                        <div class="font-bold text-slate-100">${m.codigo}</div>
-                        <div class="text-[10px] text-slate-500 uppercase font-mono">Lote: ${m.lote}</div>
-                    </td>
-                    <td class="p-4 text-right font-mono text-slate-300">${m.cantInicial.toFixed(2)}</td>
-                    <td class="p-4 text-right font-mono text-slate-300">${consumosTotal.toFixed(2)}</td>
-                    <td class="p-4 text-right font-bold font-mono ${saldo <= 0.001 ? 'text-red-400' : 'text-sky-400'}">${saldo.toFixed(2)}</td>
-                    <td class="p-4 text-center">
-                        <span class="status-badge ${statusClass}">${statusText}</span>
-                    </td>
-                `;
-                tbody.appendChild(row);
-
-                if(saldo > 0.001) {
-                    const opt = document.createElement('option');
-                    opt.value = m.id;
-                    opt.textContent = `${m.codigo} | L: ${m.lote} (S: ${saldo.toFixed(2)})`;
-                    selectLote.appendChild(opt);
-                }
+                const c = (m.consumos || []).reduce((a,x) => a + x.cantidad, 0);
+                const s = m.cantInicial - c;
+                tCons += c; tSaldo += s;
+                tbody.innerHTML += `
+                    <tr class="border-b border-slate-800 hover:bg-slate-800/30">
+                        <td class="p-4"><b>${m.codigo}</b><br><small class="text-slate-500">${m.lote}</small></td>
+                        <td class="p-4 text-right">${m.cantInicial.toFixed(2)}</td>
+                        <td class="p-4 text-right">${c.toFixed(2)}</td>
+                        <td class="p-4 text-right font-bold ${s<=0?'text-red-400':'text-sky-400'}">${s.toFixed(2)}</td>
+                        <td class="p-4 text-center"><span class="status-badge ${s<=0?'bg-red-500/10 text-red-500':'bg-green-500/10 text-green-500'}">${s<=0?'Agotado':'OK'}</span></td>
+                    </tr>`;
+                if(s > 0) select.innerHTML += `<option value="${m.id}">${m.codigo} (${m.lote})</option>`;
             });
-
-            selectLote.value = currentSelectVal;
-            document.getElementById('kpiLotes').textContent = materiales.length;
-            document.getElementById('kpiConsumo').textContent = totalConsumidoGral.toFixed(2);
-            document.getElementById('kpiSaldo').textContent = totalSaldoGral.toFixed(2);
+            document.getElementById('kpiLotes').innerText = materiales.length;
+            document.getElementById('kpiConsumo').innerText = tCons.toFixed(2);
+            document.getElementById('kpiSaldo').innerText = tSaldo.toFixed(2);
         }
 
-        function showToast(msg, type) {
-            const t = document.getElementById('toast');
-            if(!t) return;
-            t.textContent = msg;
-            t.style.backgroundColor = type === 'success' ? '#166534' : '#991b1b';
-            t.style.display = 'block';
-            t.classList.remove('translate-y-24');
-            t.classList.add('translate-y-0');
-            setTimeout(() => { 
-                t.classList.add('translate-y-24'); 
-                setTimeout(() => { if(t) t.style.display = 'none'; }, 300);
-            }, 3000);
+        function showToast(m, t) {
+            const el = document.getElementById('toast');
+            el.innerText = m; el.style.backgroundColor = t === 'success' ? '#059669' : '#dc2626';
+            el.style.display = 'block'; el.classList.remove('translate-y-24');
+            setTimeout(() => { el.classList.add('translate-y-24'); }, 3000);
         }
 
         window.onload = startPharmaCloud;
