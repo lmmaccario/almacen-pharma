@@ -120,47 +120,56 @@
         import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Firebase Initialization con fallback para producción
-        const firebaseConfig = typeof __firebase_config !== 'undefined' 
-            ? JSON.parse(__firebase_config) 
-            : { /* Configuración por defecto si falla la inyección */ };
-
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharma-almacen-1000';
-        
-        const collectionPath = ['artifacts', appId, 'public', 'data', 'materiales'];
-
+        let app, db, auth, appId, collectionPath;
         let materiales = [];
         let currentUser = null;
         let unsubscribeSnapshot = null;
 
-        // Función de autenticación robusta
-        async function initAuth() {
+        // Función para intentar inicializar Firebase repetidamente hasta que las variables estén listas
+        const startPharmaCloud = async () => {
+            const label = document.getElementById('connLabel');
+            
             try {
+                // Verificamos si la configuración está disponible (inyección de Canvas)
+                if (typeof __firebase_config === 'undefined' || !__firebase_config) {
+                    label.textContent = "Esperando parámetros del sistema...";
+                    setTimeout(startPharmaCloud, 1000);
+                    return;
+                }
+
+                const firebaseConfig = JSON.parse(__firebase_config);
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'pharma-almacen-1000';
+                collectionPath = ['artifacts', appId, 'public', 'data', 'materiales'];
+
+                label.textContent = "Autenticando usuario...";
+                
+                // Configuramos el listener de autenticación antes de iniciar sesión
+                onAuthStateChanged(auth, (user) => {
+                    currentUser = user;
+                    if (user) {
+                        updateConnUI(true);
+                        setupRealtimeListener();
+                    } else {
+                        updateConnUI(false);
+                    }
+                });
+
+                // Iniciamos sesión
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
                     await signInAnonymously(auth);
                 }
-            } catch (error) {
-                console.error("Auth Error:", error);
-                // Reintento exponencial simple para entornos de planta
-                setTimeout(initAuth, 2000);
-            }
-        }
 
-        onAuthStateChanged(auth, (user) => {
-            currentUser = user;
-            if (user) {
-                updateConnUI(true);
-                setupRealtimeListener();
-            } else {
-                updateConnUI(false);
-                if (unsubscribeSnapshot) unsubscribeSnapshot();
+            } catch (error) {
+                console.error("Error en inicio:", error);
+                label.textContent = "Fallo de red. Reintentando...";
+                setTimeout(startPharmaCloud, 2000);
             }
-        });
+        };
 
         function updateConnUI(isConnected) {
             const dot = document.getElementById('connStatus');
@@ -175,7 +184,7 @@
         }
 
         function setupRealtimeListener() {
-            if (!currentUser) return;
+            if (!currentUser || !db) return;
             const q = collection(db, ...collectionPath);
             if (unsubscribeSnapshot) unsubscribeSnapshot();
 
@@ -187,7 +196,7 @@
                 }, 
                 (error) => {
                     console.error("Snapshot Error:", error);
-                    showToast("Error de conexión. Reintentando...", "error");
+                    showToast("Error de permisos. Verificando...", "error");
                 }
             );
         }
@@ -229,6 +238,8 @@
             const ofConsumo = document.getElementById('ofConsumo').value;
 
             const material = materiales.find(m => m.id === materialId);
+            if (!material) return;
+            
             const consumosActuales = material.consumos || [];
             const saldoActual = material.cantInicial - consumosActuales.reduce((acc, c) => acc + c.cantidad, 0);
 
@@ -353,7 +364,8 @@
             }, 3000);
         }
 
-        initAuth();
+        // Inicio de la aplicación
+        window.onload = startPharmaCloud;
     </script>
 </body>
 </html>
