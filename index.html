@@ -125,28 +125,37 @@
         let currentUser = null;
         let unsubscribeSnapshot = null;
 
-        // Función para intentar inicializar Firebase repetidamente hasta que las variables estén listas
+        // Intentar obtener la config del sistema o usar una estructura vacía para evitar errores de parseo
+        const getSystemConfig = () => {
+            try {
+                if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+                    return JSON.parse(__firebase_config);
+                }
+            } catch (e) {
+                console.warn("Configuración inyectada no válida, intentando conexión alternativa...");
+            }
+            return null;
+        };
+
         const startPharmaCloud = async () => {
             const label = document.getElementById('connLabel');
+            const config = getSystemConfig();
             
-            try {
-                // Verificamos si la configuración está disponible (inyección de Canvas)
-                if (typeof __firebase_config === 'undefined' || !__firebase_config) {
-                    label.textContent = "Esperando parámetros del sistema...";
-                    setTimeout(startPharmaCloud, 1000);
-                    return;
-                }
+            if (!config) {
+                label.textContent = "Error: Configuración no encontrada. Revise su entorno.";
+                // Si estás en GitHub Pages y sale este error, es porque falta inyectar la llave.
+                // Sin embargo, para este ejercicio, forzamos el reintento.
+                setTimeout(startPharmaCloud, 3000);
+                return;
+            }
 
-                const firebaseConfig = JSON.parse(__firebase_config);
-                app = initializeApp(firebaseConfig);
+            try {
+                app = initializeApp(config);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 appId = typeof __app_id !== 'undefined' ? __app_id : 'pharma-almacen-1000';
                 collectionPath = ['artifacts', appId, 'public', 'data', 'materiales'];
 
-                label.textContent = "Autenticando usuario...";
-                
-                // Configuramos el listener de autenticación antes de iniciar sesión
                 onAuthStateChanged(auth, (user) => {
                     currentUser = user;
                     if (user) {
@@ -157,7 +166,6 @@
                     }
                 });
 
-                // Iniciamos sesión
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
@@ -166,8 +174,8 @@
 
             } catch (error) {
                 console.error("Error en inicio:", error);
-                label.textContent = "Fallo de red. Reintentando...";
-                setTimeout(startPharmaCloud, 2000);
+                label.textContent = "Error de Red. Reintentando...";
+                setTimeout(startPharmaCloud, 5000);
             }
         };
 
@@ -179,7 +187,7 @@
                 label.textContent = "Conectado a Pharma Cloud";
             } else {
                 dot.className = "w-2 h-2 bg-red-500 rounded-full";
-                label.textContent = "Reconectando...";
+                label.textContent = "Desconectado";
             }
         }
 
@@ -196,14 +204,14 @@
                 }, 
                 (error) => {
                     console.error("Snapshot Error:", error);
-                    showToast("Error de permisos. Verificando...", "error");
+                    showToast("Error de acceso a datos", "error");
                 }
             );
         }
 
         document.getElementById('formIngreso').addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!currentUser) return;
+            if (!currentUser) { showToast("No conectado", "error"); return; }
 
             const codigo = document.getElementById('codMaterial').value.trim();
             const lote = document.getElementById('lote').value.trim();
@@ -264,13 +272,13 @@
         });
 
         window.exportToCSV = () => {
-            if (materiales.length === 0) return;
+            if (materiales.length === 0) { showToast("No hay datos para exportar", "error"); return; }
             let csv = 'Codigo,Lote,Inicial,Consumido,Saldo,OPs\n';
             materiales.forEach(m => {
                 const cons = (m.consumos || []).reduce((a,c) => a + c.cantidad, 0);
                 csv += `"${m.codigo}","${m.lote}",${m.cantInicial},${cons},${(m.cantInicial-cons).toFixed(2)},"${m.ops}"\n`;
             });
-            const blob = new Blob([csv], { type: 'text/csv' });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -278,7 +286,10 @@
             a.click();
         };
 
-        window.confirmClearData = () => document.getElementById('confirmModal').style.display = 'flex';
+        window.confirmClearData = () => {
+            if (materiales.length === 0) return;
+            document.getElementById('confirmModal').style.display = 'flex';
+        };
         window.closeModal = () => document.getElementById('confirmModal').style.display = 'none';
 
         document.getElementById('btnConfirmClear').addEventListener('click', async () => {
@@ -290,7 +301,7 @@
                 snapshot.docs.forEach(d => batch.delete(d.ref));
                 await batch.commit();
                 closeModal();
-                showToast("Datos eliminados", "success");
+                showToast("Base de datos limpia", "success");
             } catch (err) {
                 showToast("Error al limpiar", "error");
             }
@@ -329,7 +340,7 @@
                     </td>
                     <td class="p-4 text-right font-mono text-slate-300">${m.cantInicial.toFixed(2)}</td>
                     <td class="p-4 text-right font-mono text-slate-300">${consumosTotal.toFixed(2)}</td>
-                    <td class="p-4 text-right font-bold font-mono ${saldo <= 0 ? 'text-red-400' : 'text-sky-400'}">${saldo.toFixed(2)}</td>
+                    <td class="p-4 text-right font-bold font-mono ${saldo <= 0.001 ? 'text-red-400' : 'text-sky-400'}">${saldo.toFixed(2)}</td>
                     <td class="p-4 text-center">
                         <span class="status-badge ${statusClass}">${statusText}</span>
                     </td>
@@ -360,11 +371,10 @@
             t.classList.add('translate-y-0');
             setTimeout(() => { 
                 t.classList.add('translate-y-24'); 
-                setTimeout(() => t.style.display = 'none', 300);
+                setTimeout(() => { if(t) t.style.display = 'none'; }, 300);
             }, 3000);
         }
 
-        // Inicio de la aplicación
         window.onload = startPharmaCloud;
     </script>
 </body>
