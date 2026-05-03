@@ -22,12 +22,21 @@
     </style>
 </head>
 <body>
+    <!-- Vista de Configuración Forzada -->
     <div id="setupView" class="hidden fixed inset-0 z-[100] flex items-center justify-center bg-slate-950 p-4">
-        <div class="glass-panel p-8 max-w-md w-full space-y-4">
-            <h2 class="text-xl font-bold text-sky-400">Configuración Inicial Cloud</h2>
-            <p class="text-sm text-slate-400">Para funcionar en GitHub Pages, pegue el JSON de configuración de su proyecto Firebase aquí:</p>
-            <textarea id="manualConfig" class="input-pharma h-32 text-xs font-mono" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", ...}'></textarea>
-            <button id="btnSaveConfig" class="btn-primary w-full">Activar Conexión</button>
+        <div class="glass-panel p-8 max-w-md w-full space-y-4 shadow-2xl border-sky-900/50">
+            <h2 class="text-xl font-bold text-sky-400 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Configuración Cloud
+            </h2>
+            <p class="text-xs text-slate-400 leading-relaxed">Detectamos que la aplicación se ejecuta fuera del entorno de desarrollo. Para sincronizar, pegue el JSON de Firebase:</p>
+            <textarea id="manualConfig" class="input-pharma h-48 text-[10px] font-mono leading-tight" placeholder='{"apiKey": "...", "authDomain": "...", "projectId": "...", ...}'></textarea>
+            <div class="flex gap-2">
+                <button id="btnSaveConfig" class="btn-primary flex-1">Activar Conexión</button>
+                <button onclick="document.getElementById('setupView').classList.add('hidden')" class="bg-slate-800 text-slate-400 px-4 rounded text-xs hover:bg-slate-700">Cerrar</button>
+            </div>
         </div>
     </div>
 
@@ -42,6 +51,10 @@
                 </div>
             </div>
             <div class="flex gap-2">
+                <button onclick="document.getElementById('setupView').classList.remove('hidden')" class="bg-slate-800 text-slate-400 px-4 py-2 rounded border border-slate-700 text-sm flex items-center gap-1">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    Configurar Cloud
+                </button>
                 <button onclick="exportToCSV()" class="bg-slate-800 text-white px-4 py-2 rounded border border-slate-700 text-sm">Exportar CSV</button>
                 <button onclick="confirmClearData()" class="bg-red-900/30 text-red-400 px-4 py-2 rounded border border-red-900/50 text-sm">Limpiar Campaña</button>
             </div>
@@ -114,11 +127,11 @@
 
     <div id="confirmModal" class="modal">
         <div class="glass-panel p-6 max-w-sm w-full mx-4 text-center">
-            <h3 class="font-bold mb-2">¿Limpiar Base de Datos?</h3>
+            <h3 class="font-bold mb-2 text-white">¿Limpiar Base de Datos?</h3>
             <p class="text-xs text-slate-400 mb-6">Esto eliminará los datos para TODOS los usuarios conectados.</p>
             <div class="flex gap-2">
-                <button onclick="closeModal()" class="flex-1 bg-slate-700 p-2 rounded text-xs">Cancelar</button>
-                <button id="btnConfirmClear" class="flex-1 bg-red-600 p-2 rounded text-xs font-bold">Eliminar Todo</button>
+                <button onclick="closeModal()" class="flex-1 bg-slate-700 p-2 rounded text-xs text-white">Cancelar</button>
+                <button id="btnConfirmClear" class="flex-1 bg-red-600 p-2 rounded text-xs font-bold text-white">Eliminar Todo</button>
             </div>
         </div>
     </div>
@@ -136,26 +149,31 @@
 
         const startPharmaCloud = async () => {
             const label = document.getElementById('connLabel');
+            const setupView = document.getElementById('setupView');
             let config = null;
 
-            // 1. Intentar obtener config inyectada
+            // 1. Detectar si estamos en el entorno de desarrollo (Canvas)
             if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                config = JSON.parse(__firebase_config);
+                try { config = JSON.parse(__firebase_config); } catch(e) {}
             } 
-            // 2. Intentar obtener config guardada manualmente en el navegador
-            else {
+            
+            // 2. Si no, buscar en almacenamiento local (GitHub Pages)
+            if (!config) {
                 const saved = localStorage.getItem('pharma_fb_config');
-                if (saved) config = JSON.parse(saved);
+                if (saved) {
+                    try { config = JSON.parse(saved); } catch(e) {}
+                }
             }
 
+            // 3. Si sigue sin haber config, mostrar pantalla oscura inmediatamente
             if (!config) {
-                document.getElementById('setupView').classList.remove('hidden');
-                label.textContent = "Esperando configuración manual...";
+                setupView.classList.remove('hidden');
+                label.textContent = "ESPERANDO CONFIGURACIÓN...";
                 return;
             }
 
             try {
-                document.getElementById('setupView').classList.add('hidden');
+                setupView.classList.add('hidden');
                 app = initializeApp(config);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -169,7 +187,7 @@
                         setupRealtimeListener();
                     } else {
                         updateConnUI(false);
-                        label.textContent = "Autenticando...";
+                        label.textContent = "CONECTANDO...";
                     }
                 });
 
@@ -181,21 +199,22 @@
 
             } catch (error) {
                 console.error("Error en inicio:", error);
-                label.textContent = "Error de Conexión. Reintente.";
-                localStorage.removeItem('pharma_fb_config'); // Limpiar si falló
-                setTimeout(() => location.reload(), 3000);
+                label.textContent = "ERROR DE CONFIGURACIÓN";
+                // Si la config guardada es errónea, abrir setup para corregir
+                setupView.classList.remove('hidden');
             }
         };
 
-        // Manejador para configuración manual
+        // Guardar configuración manual
         document.getElementById('btnSaveConfig').onclick = () => {
-            const val = document.getElementById('manualConfig').value;
+            const val = document.getElementById('manualConfig').value.trim();
+            if(!val) return;
             try {
                 JSON.parse(val);
                 localStorage.setItem('pharma_fb_config', val);
                 location.reload();
             } catch (e) {
-                alert("JSON no válido. Asegúrese de copiar el objeto completo { ... }");
+                alert("El JSON no es válido. Asegúrese de copiar el objeto completo desde la consola de Firebase.");
             }
         };
 
@@ -203,8 +222,8 @@
             const dot = document.getElementById('connStatus');
             const label = document.getElementById('connLabel');
             if (isConnected) {
-                dot.className = "w-2 h-2 bg-sky-500 rounded-full animate-pulse";
-                label.textContent = "Conectado a Pharma Cloud";
+                dot.className = "w-2 h-2 bg-sky-500 rounded-full animate-pulse shadow-[0_0_8px_#38bdf8]";
+                label.textContent = "Sincronizado Cloud";
             } else {
                 dot.className = "w-2 h-2 bg-red-500 rounded-full";
             }
@@ -223,15 +242,15 @@
                 }, 
                 (error) => {
                     console.error("Snapshot Error:", error);
-                    showToast("Error de acceso", "error");
+                    showToast("Error de acceso a datos", "error");
                 }
             );
         }
 
-        // --- Lógica de Negocio ---
+        // --- Operaciones ---
         document.getElementById('formIngreso').onsubmit = async (e) => {
             e.preventDefault();
-            if (!currentUser) return;
+            if (!currentUser) { showToast("No conectado", "error"); return; }
             const data = {
                 codigo: document.getElementById('codMaterial').value.trim(),
                 lote: document.getElementById('lote').value.trim(),
@@ -242,9 +261,9 @@
             };
             try {
                 await setDoc(doc(db, ...collectionPath, crypto.randomUUID()), data);
-                showToast("Material registrado", "success");
+                showToast("Registrado con éxito", "success");
                 e.target.reset();
-            } catch (err) { showToast("Error al guardar", "error"); }
+            } catch (err) { showToast("Fallo al guardar", "error"); }
         };
 
         document.getElementById('formConsumo').onsubmit = async (e) => {
@@ -254,58 +273,86 @@
             const m = materiales.find(x => x.id === id);
             if (!m) return;
             const saldo = m.cantInicial - (m.consumos || []).reduce((a,c) => a + c.cantidad, 0);
-            if (cant > saldo) { showToast("Saldo insuficiente", "error"); return; }
+            if (cant > saldo) { showToast("Excede el saldo disponible", "error"); return; }
             try {
                 await updateDoc(doc(db, ...collectionPath, id), {
-                    consumos: [...(m.consumos || []), { of: document.getElementById('ofConsumo').value, cantidad: cant, fecha: new Date().toISOString() }]
+                    consumos: [...(m.consumos || []), { 
+                        of: document.getElementById('ofConsumo').value, 
+                        cantidad: cant, 
+                        fecha: new Date().toISOString() 
+                    }]
                 });
-                showToast("Consumo registrado", "success");
+                showToast("Consumo aplicado", "success");
                 e.target.reset();
-            } catch (err) { showToast("Error", "error"); }
+            } catch (err) { showToast("Error en servidor", "error"); }
         };
 
         window.exportToCSV = () => {
-            let csv = 'Codigo,Lote,Inicial,Consumido,Saldo\n';
+            if(materiales.length === 0) return;
+            let csv = '\uFEFFCodigo,Lote,Inicial,Consumido,Saldo,OPs\n';
             materiales.forEach(m => {
                 const c = (m.consumos || []).reduce((a,x) => a + x.cantidad, 0);
-                csv += `${m.codigo},${m.lote},${m.cantInicial},${c},${(m.cantInicial-c).toFixed(2)}\n`;
+                csv += `"${m.codigo}","${m.lote}",${m.cantInicial},${c},${(m.cantInicial-c).toFixed(2)},"${m.ops}"\n`;
             });
-            const blob = new Blob([csv], { type: 'text/csv' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url; a.download = 'PharmaStock_1000.csv'; a.click();
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `PharmaStock_1000_${new Date().toLocaleDateString()}.csv`;
+            link.click();
         };
 
-        window.confirmClearData = () => document.getElementById('confirmModal').style.display = 'flex';
+        window.confirmClearData = () => {
+            if (materiales.length === 0) return;
+            document.getElementById('confirmModal').style.display = 'flex';
+        };
         window.closeModal = () => document.getElementById('confirmModal').style.display = 'none';
         document.getElementById('btnConfirmClear').onclick = async () => {
-            const batch = writeBatch(db);
-            const docs = await getDocs(collection(db, ...collectionPath));
-            docs.forEach(d => batch.delete(d.ref));
-            await batch.commit();
-            closeModal();
-            showToast("Datos eliminados", "success");
+            try {
+                const batch = writeBatch(db);
+                const docs = await getDocs(collection(db, ...collectionPath));
+                docs.forEach(d => batch.delete(d.ref));
+                await batch.commit();
+                closeModal();
+                showToast("Historial borrado", "success");
+            } catch (err) { showToast("Fallo al limpiar", "error"); }
         };
 
         function renderApp() {
             const tbody = document.getElementById('inventoryBody');
             const select = document.getElementById('selectLote');
-            tbody.innerHTML = ''; select.innerHTML = '<option value="">Seleccione Lote...</option>';
+            const currentVal = select.value;
+            tbody.innerHTML = ''; 
+            select.innerHTML = '<option value="">Seleccione Lote...</option>';
+            
             let tCons = 0, tSaldo = 0;
             materiales.forEach(m => {
                 const c = (m.consumos || []).reduce((a,x) => a + x.cantidad, 0);
                 const s = m.cantInicial - c;
                 tCons += c; tSaldo += s;
+                
                 tbody.innerHTML += `
-                    <tr class="border-b border-slate-800 hover:bg-slate-800/30">
-                        <td class="p-4"><b>${m.codigo}</b><br><small class="text-slate-500">${m.lote}</small></td>
-                        <td class="p-4 text-right">${m.cantInicial.toFixed(2)}</td>
-                        <td class="p-4 text-right">${c.toFixed(2)}</td>
-                        <td class="p-4 text-right font-bold ${s<=0?'text-red-400':'text-sky-400'}">${s.toFixed(2)}</td>
-                        <td class="p-4 text-center"><span class="status-badge ${s<=0?'bg-red-500/10 text-red-500':'bg-green-500/10 text-green-500'}">${s<=0?'Agotado':'OK'}</span></td>
+                    <tr class="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
+                        <td class="p-4">
+                            <div class="font-bold text-slate-100">${m.codigo}</div>
+                            <div class="text-[10px] text-slate-500 font-mono">${m.lote}</div>
+                        </td>
+                        <td class="p-4 text-right font-mono">${m.cantInicial.toFixed(2)}</td>
+                        <td class="p-4 text-right font-mono text-slate-400">${c.toFixed(2)}</td>
+                        <td class="p-4 text-right font-bold font-mono ${s<=0.001?'text-red-400':'text-sky-400'}">${s.toFixed(2)}</td>
+                        <td class="p-4 text-center">
+                            <span class="status-badge ${s<=0.001?'bg-red-500/10 text-red-500 border border-red-500/20':'bg-green-500/10 text-green-500 border border-green-500/20'}">
+                                ${s<=0.001?'AGOTADO':'DISPONIBLE'}
+                            </span>
+                        </td>
                     </tr>`;
-                if(s > 0) select.innerHTML += `<option value="${m.id}">${m.codigo} (${m.lote})</option>`;
+                if(s > 0.001) {
+                    const opt = document.createElement('option');
+                    opt.value = m.id;
+                    opt.textContent = `${m.codigo} | ${m.lote} (S: ${s.toFixed(2)})`;
+                    select.appendChild(opt);
+                }
             });
+            select.value = currentVal;
             document.getElementById('kpiLotes').innerText = materiales.length;
             document.getElementById('kpiConsumo').innerText = tCons.toFixed(2);
             document.getElementById('kpiSaldo').innerText = tSaldo.toFixed(2);
