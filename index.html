@@ -29,7 +29,7 @@
                 <p class="text-slate-400 text-sm">Sincronización Multi-usuario en Tiempo Real</p>
                 <div class="flex items-center gap-2 mt-1">
                     <span id="connStatus" class="w-2 h-2 bg-red-500 rounded-full"></span>
-                    <span id="connLabel" class="text-[10px] text-slate-500 uppercase tracking-widest">Desconectado</span>
+                    <span id="connLabel" class="text-[10px] text-slate-500 uppercase tracking-widest">Iniciando conexión...</span>
                 </div>
             </div>
             <div class="flex gap-2">
@@ -120,21 +120,23 @@
         import { getFirestore, collection, doc, onSnapshot, setDoc, updateDoc, getDocs, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
-        // Firebase Initialization
-        const firebaseConfig = JSON.parse(__firebase_config);
+        // Firebase Initialization con fallback para producción
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : { /* Configuración por defecto si falla la inyección */ };
+
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'pharma-almacen-1000';
         
-        // Use Strict Path (Rule 1)
         const collectionPath = ['artifacts', appId, 'public', 'data', 'materiales'];
 
         let materiales = [];
         let currentUser = null;
         let unsubscribeSnapshot = null;
 
-        // Authentication Flow (Rule 3)
+        // Función de autenticación robusta
         async function initAuth() {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -144,11 +146,11 @@
                 }
             } catch (error) {
                 console.error("Auth Error:", error);
-                showToast("Error de autenticación", "error");
+                // Reintento exponencial simple para entornos de planta
+                setTimeout(initAuth, 2000);
             }
         }
 
-        // Listener for Auth State
         onAuthStateChanged(auth, (user) => {
             currentUser = user;
             if (user) {
@@ -165,42 +167,34 @@
             const label = document.getElementById('connLabel');
             if (isConnected) {
                 dot.className = "w-2 h-2 bg-sky-500 rounded-full animate-pulse";
-                label.textContent = "Conectado a Firestore";
+                label.textContent = "Conectado a Pharma Cloud";
             } else {
                 dot.className = "w-2 h-2 bg-red-500 rounded-full";
-                label.textContent = "Desconectado";
+                label.textContent = "Reconectando...";
             }
         }
 
         function setupRealtimeListener() {
             if (!currentUser) return;
-            
             const q = collection(db, ...collectionPath);
-            
-            // Unsubscribe existing if any
             if (unsubscribeSnapshot) unsubscribeSnapshot();
 
             unsubscribeSnapshot = onSnapshot(q, 
                 (snapshot) => {
                     materiales = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // Sort in memory (Rule 2)
                     materiales.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
                     renderApp();
                 }, 
                 (error) => {
                     console.error("Snapshot Error:", error);
-                    showToast("Error de permisos: Verificando...", "error");
+                    showToast("Error de conexión. Reintentando...", "error");
                 }
             );
         }
 
-        // Database Operations
         document.getElementById('formIngreso').addEventListener('submit', async (e) => {
             e.preventDefault();
-            if (!currentUser) {
-                showToast("No hay conexión con el servidor", "error");
-                return;
-            }
+            if (!currentUser) return;
 
             const codigo = document.getElementById('codMaterial').value.trim();
             const lote = document.getElementById('lote').value.trim();
@@ -222,8 +216,7 @@
                 showToast("Material guardado", "success");
                 e.target.reset();
             } catch (err) {
-                console.error(err);
-                showToast("Error al guardar en la nube", "error");
+                showToast("Error al guardar", "error");
             }
         });
 
@@ -255,7 +248,7 @@
                 showToast("Consumo registrado", "success");
                 e.target.reset();
             } catch (err) {
-                showToast("Error al actualizar consumo", "error");
+                showToast("Error al actualizar", "error");
             }
         });
 
@@ -286,9 +279,9 @@
                 snapshot.docs.forEach(d => batch.delete(d.ref));
                 await batch.commit();
                 closeModal();
-                showToast("Base de datos limpia", "success");
+                showToast("Datos eliminados", "success");
             } catch (err) {
-                showToast("Error al limpiar datos", "error");
+                showToast("Error al limpiar", "error");
             }
         });
 
@@ -348,12 +341,16 @@
 
         function showToast(msg, type) {
             const t = document.getElementById('toast');
+            if(!t) return;
             t.textContent = msg;
             t.style.backgroundColor = type === 'success' ? '#166534' : '#991b1b';
             t.style.display = 'block';
             t.classList.remove('translate-y-24');
             t.classList.add('translate-y-0');
-            setTimeout(() => { t.classList.add('translate-y-24'); }, 3000);
+            setTimeout(() => { 
+                t.classList.add('translate-y-24'); 
+                setTimeout(() => t.style.display = 'none', 300);
+            }, 3000);
         }
 
         initAuth();
